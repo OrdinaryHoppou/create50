@@ -21,24 +21,71 @@ impl App {
     }
 
     pub async fn run(&mut self) -> anyhow::Result<()> {
-        self.create_config().await?;
-
         let repo_owner = &self.config.github_repository.owner.clone();
         let repo_name = &self.config.github_repository.repository.clone();
 
-        let latest = &self.get_latest_release(repo_owner, repo_name).await?;
-        println!("{}", latest);
+        let mut latest = &self.get_latest_release(repo_owner, repo_name).await;
+
+        &mut latest.unwrap();
 
         Ok(())
     }
 
-    pub async fn create_config(&self) -> anyhow::Result<()> {
+    pub async fn init_config(&mut self) -> anyhow::Result<()> {
         let config_dir = dirs::config_dir().unwrap().join("create50");
+        let config_file = &config_dir.join("config.toml");
 
-        tokio::fs::create_dir_all(&config_dir).await?;
+        info!(
+            "Attempting to load configuration file from {:?}",
+            config_file
+        );
 
+        if !config_file.exists() {
+            warn!("Configuration file does not exist. Attempting to create.");
+
+            if let Err(e) = tokio::fs::create_dir_all(&config_dir).await {
+                error!(
+                    "Unable to create configuration directory at {:?}: {}",
+                    config_dir, e
+                );
+                std::process::exit(0);
+            }
+
+            if let Err(e) = &self.recreate_config(config_dir).await {
+                error!("Unable to recreate configuration file: {}", e);
+                std::process::exit(1);
+            }
+        } else {
+            info!("Reading config file {:?}", config_file);
+            let config_file_contents = tokio::fs::read_to_string(config_file).await;
+
+            if let Err(e) = config_file_contents {
+                error!("Unable to read configuration file: {}", e);
+                std::process::exit(1);
+            }
+
+            info!("Deserializing config file.");
+            let deserialized_config =
+                ron::de::from_str::<config::Config>(&config_file_contents.unwrap());
+
+            if let Err(e) = deserialized_config {
+                error!("Unable to deserialize configuration file: {}", e);
+                std::process::exit(1);
+            }
+
+            self.config = deserialized_config.unwrap();
+
+            info!("Loaded configuration file successfully.");
+        }
+
+        Ok(())
+    }
+
+    pub async fn recreate_config(&mut self, config_dir: std::path::PathBuf) -> anyhow::Result<()> {
+        let config_file = &config_dir.join("config.toml");
         let content = ron::ser::to_string_pretty(&self.config, PrettyConfig::new())?;
-        tokio::fs::write(&config_dir.join("config.toml"), content).await?;
+
+        tokio::fs::write(config_file, content).await?;
 
         Ok(())
     }
