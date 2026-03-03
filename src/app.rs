@@ -24,9 +24,15 @@ impl App {
         let repo_owner = &self.config.github_repository.owner.clone();
         let repo_name = &self.config.github_repository.repository.clone();
 
-        let mut latest = &self.get_latest_release(repo_owner, repo_name).await;
+        let latest = &self.get_latest_release(repo_owner, repo_name).await;
 
-        &mut latest.unwrap();
+        if let Err(e) = &latest {
+            error!(
+                "Unable to fetch latest release tag from {}/{}: {}",
+                repo_owner, repo_name, e
+            );
+            std::process::exit(0);
+        }
 
         Ok(())
     }
@@ -95,7 +101,7 @@ impl App {
         owner: &String,
         repository: &String,
     ) -> anyhow::Result<String> {
-        info!("Getting latest release url from {}/{}", owner, repository);
+        info!("Getting latest release url from {}/{}.", owner, repository);
 
         let query = &self
             .github
@@ -106,6 +112,7 @@ impl App {
             .await?;
 
         if let Some(tag) = query.into_iter().next() {
+            info!("Sucessfully fetched release url.");
             Ok(tag.zipball_url.to_string().clone())
         } else {
             Err(anyhow::anyhow!(
